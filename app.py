@@ -4,6 +4,11 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 import plotly.express as px
+import pyotp
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
+from email.utils import formataddr
 import json
 import os
 
@@ -20,6 +25,20 @@ USER_DATA_FILE = "user_data.json"
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
+# --- User Data Functions ---
+def load_user_data():
+    if not os.path.exists(USER_DATA_FILE):
+        return {}
+    try:
+        with open(USER_DATA_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_user_data(data):
+    with open(USER_DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
 # --- Data Loading ---
 @st.cache_data(ttl=10)
 def get_data():
@@ -35,9 +54,94 @@ def get_data():
     except Exception:
         return pd.DataFrame()
 
-# --- Main Dashboard ---
+# --- OTP & Login Logic ---
+def login_page():
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        st.title("NTAVis Dashboard")
+        st.markdown("Please sign in to continue.")
+
+        user_data = load_user_data()
+        is_known_user = st.secrets["login"]["username"] in user_data
+
+        if is_known_user:
+            # --- PATH FOR RETURNING USERS (NO OTP) ---
+            with st.form("login_form"):
+                st.text_input("Username", value=st.secrets["login"]["username"], disabled=True)
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Login")
+
+                if submitted:
+                    if password.strip() == st.secrets["login"]["password"]:
+                        st.session_state["logged_in"] = True
+                        st.success("Login successful!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Incorrect password.")
+        else:
+            # --- PATH FOR FIRST-TIME USERS (OTP REQUIRED) ---
+            if not st.session_state.get("otp_sent"):
+                with st.form("first_login_form"):
+                    username = st.text_input("Username")
+                    password = st.text_input("Password", type="password")
+                    email = st.text_input("Email (for first-time verification)")
+                    submitted = st.form_submit_button("Send OTP")
+
+                    if submitted:
+                        is_correct = (username.strip() == st.secrets["login"]["username"] and password.strip() == st.secrets["login"]["password"])
+                        if is_correct:
+                            if not email:
+                                st.error("Email is required for the first login.")
+                            else:
+                                st.session_state["totp"] = pyotp.TOTP(pyotp.random_base32())
+                                if send_otp(st.session_state["totp"].now(), email):
+                                    st.session_state["otp_sent"] = True
+                                    st.session_state["email_to_save"] = email.strip()
+                                    st.success(f"OTP sent to {email}! Please check your email.")
+                                    st.rerun()
+                        else:
+                            st.error("❌ Incorrect username or password.")
+            else:
+                with st.form("otp_form"):
+                    otp_input = st.text_input("Enter OTP from your email")
+                    submitted = st.form_submit_button("Verify OTP")
+                    if submitted:
+                        if st.session_state.get("totp") and st.session_state["totp"].verify(otp_input.strip(), valid_window=2):
+                            user_data[st.secrets["login"]["username"]] = st.session_state["email_to_save"]
+                            save_user_data(user_data)
+                            
+                            st.session_state["logged_in"] = True
+                            st.session_state.pop("otp_sent", None)
+                            st.session_state.pop("totp", None)
+                            st.success("Login successful! Future logins will not require OTP.")
+                            st.rerun()
+                        else:
+                            st.error("Invalid or expired OTP.")
+
+def send_otp(otp, recipient_email):
+    try:
+        sender_email = st.secrets["gmail"]["email"]
+        app_password = st.secrets["gmail"]["app_password"]
+        msg = MIMEText(f"Your OTP code is: {otp}")
+        msg["Subject"] = "Your NTAVis OTP Code"
+        msg["From"] = formataddr((str(Header('NTAVis OTP', 'utf-8')), sender_email))
+        msg["To"] = recipient_email
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender_email, app_password)
+            server.sendmail(sender_email, recipient_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Failed to send OTP. Check your secrets.toml file. Error: {e}")
+        return False
+
+# --- Main App Logic ---
 def main_dashboard():
-    st.sidebar.title("Welcome to NTAVis Dashboard!")
+    st.sidebar.title(f"Welcome, {st.secrets['login']['username']}!")
+    if st.sidebar.button("Logout"):
+        st.session_state.clear()
+        st.rerun()
+
+    st.sidebar.markdown("---")
     menu = st.sidebar.radio("📋 Menu", ["📊 Overview", "🗺️ Geo Map", "📈 Analytics"])
     
     df = get_data()
@@ -66,14 +170,7 @@ def main_dashboard():
             avg_lat, avg_lon = map_df["latitude"].mean(), map_df["longitude"].mean()
             m = folium.Map(location=[avg_lat, avg_lon], zoom_start=2, tiles="CartoDB positron")
             for _, row in map_df.iterrows():
-                folium.CircleMarker(
-                    location=[row["latitude"], row["longitude"]],
-                    radius=5,
-                    color="red",
-                    fill=True,
-                    fill_color="red",
-                    popup=f"IP: {row['src_ip']}<br>Threat: {row['threat_type']}"
-                ).add_to(m)
+                folium.CircleMarker(location=[row["latitude"], row["longitude"]], radius=5, color="red", fill=True, fill_color="red", popup=f"IP: {row['src_ip']}<br>Threat: {row['threat_type']}").add_to(m)
             st_folium(m, use_container_width=True, height=600)
         else:
             st.info("No geolocation data to display on the map.")
@@ -109,6 +206,14 @@ def main_dashboard():
             st.plotly_chart(fig4, use_container_width=True, config=config)
             st.download_button("Download Data as CSV", convert_df_to_csv(top_dst_ips_df), "top_dest_ips.csv", "text/csv", key='download-dst-ips')
 
-# --- Run App ---
 if __name__ == "__main__":
-    main_dashboard()
+    if 'gmail' not in st.secrets or 'login' not in st.secrets:
+        st.error("CRITICAL: Your .streamlit/secrets.toml file is missing or incomplete.")
+    else:
+        if "logged_in" not in st.session_state:
+            st.session_state.logged_in = False
+        
+        if st.session_state.logged_in:
+            main_dashboard()
+        else:
+            login_page()
