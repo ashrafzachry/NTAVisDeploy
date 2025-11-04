@@ -121,9 +121,28 @@ def send_otp(otp, recipient_email):
         msg["Subject"] = "Your NTAVis OTP Code"
         msg["From"] = formataddr((str(Header('NTAVis OTP', 'utf-8')), sender_email))
         msg["To"] = recipient_email
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        def send_otp(otp, recipient_email):
+    try:
+        sender_email = st.secrets["gmail"]["email"]
+        app_password = st.secrets["gmail"]["app_password"]
+
+        msg = MIMEText(f"Your OTP code is: {otp}")
+        msg["Subject"] = "Your NTAVis OTP Code"
+        msg["From"] = formataddr((str(Header('NTAVis OTP', 'utf-8')), sender_email))
+        msg["To"] = recipient_email
+
+        # ✅ Updated for Gmail TLS (Port 587)
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
             server.login(sender_email, app_password)
             server.sendmail(sender_email, recipient_email, msg.as_string())
+
+        return True
+
+    except Exception as e:
+        st.error(f"Failed to send OTP. Check your secrets.toml file. Error: {e}")
+        return False
+
         return True
     except Exception as e:
         st.error(f"Failed to send OTP. Check your secrets.toml file. Error: {e}")
