@@ -135,7 +135,6 @@ def send_otp(otp, recipient_email):
         st.error(f"Failed to send OTP. Check your secrets.toml file. Error: {e}")
         return False
 
-
 # --- Main App Logic ---
 def main():
     if "logged_in" not in st.session_state: st.session_state.logged_in = False
