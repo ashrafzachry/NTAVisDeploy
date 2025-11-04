@@ -35,29 +35,9 @@ def get_data():
     except Exception:
         return pd.DataFrame()
 
-# --- Login Page ---
-def login_page():
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        st.title("NTAVis Dashboard")
-        st.markdown("Please sign in to continue.")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
-            if password == st.secrets["login"]["password"]:
-                st.session_state.logged_in = True
-                st.success("Login successful!")
-                st.experimental_rerun()
-            else:
-                st.error("❌ Incorrect password.")
-
 # --- Main Dashboard ---
 def main_dashboard():
-    st.sidebar.title(f"Welcome, {st.secrets['login']['username']}!")
-    if st.sidebar.button("Logout"):
-        st.session_state.logged_in = False
-        st.experimental_rerun()
-
-    st.sidebar.markdown("---")
+    st.sidebar.title("Welcome to NTAVis Dashboard!")
     menu = st.sidebar.radio("📋 Menu", ["📊 Overview", "🗺️ Geo Map", "📈 Analytics"])
     
     df = get_data()
@@ -66,7 +46,6 @@ def main_dashboard():
         st.warning("No packet data found. Is the capture script running?")
         return
 
-    # --- Overview ---
     if menu == "📊 Overview":
         st.markdown("## 📊 Threat Overview")
         threat_counts = df["threat_type"].value_counts()
@@ -75,11 +54,11 @@ def main_dashboard():
         col2.metric("⚠️ Malformed", int(threat_counts.get("Malformed", 0)))
         col3.metric("🌊 SYN Flood", int(threat_counts.get("SYN Flood", 0)))
         col4.metric("💧 UDP Flood", int(threat_counts.get("UDP Flood", 0)))
+        
         st.markdown("---")
         st.subheader("📂 Raw Packet Data")
         st.dataframe(df.tail(1000), use_container_width=True)
 
-    # --- Geo Map ---
     elif menu == "🗺️ Geo Map":
         st.markdown("## 🗺️ Threat Source Map")
         map_df = df.dropna(subset=["latitude", "longitude"])
@@ -89,30 +68,32 @@ def main_dashboard():
             for _, row in map_df.iterrows():
                 folium.CircleMarker(
                     location=[row["latitude"], row["longitude"]],
-                    radius=5, color="red", fill=True, fill_color="red",
+                    radius=5,
+                    color="red",
+                    fill=True,
+                    fill_color="red",
                     popup=f"IP: {row['src_ip']}<br>Threat: {row['threat_type']}"
                 ).add_to(m)
             st_folium(m, use_container_width=True, height=600)
         else:
             st.info("No geolocation data to display on the map.")
-
-    # --- Analytics ---
+            
     elif menu == "📈 Analytics":
         st.markdown("## 📈 Analytics Dashboard")
         config = {'toImageButtonOptions': {'format': 'png', 'scale': 2}}
-
+        
         st.markdown("#### Traffic Composition")
         col1, col2 = st.columns(2)
         with col1:
             threat_counts_df = df["threat_type"].value_counts().reset_index()
             fig1 = px.bar(threat_counts_df, x="threat_type", y="count", title="Threats by Type", labels={'threat_type':'Threat Type'})
             st.plotly_chart(fig1, use_container_width=True, config=config)
-            st.download_button("Download Data as CSV", convert_df_to_csv(threat_counts_df), "threats_by_type.csv", "text/csv")
+            st.download_button("Download Data as CSV", convert_df_to_csv(threat_counts_df), "threats_by_type.csv", "text/csv", key='download-threats')
         with col2:
             protocol_counts_df = df["protocol"].value_counts().reset_index()
             fig2 = px.pie(protocol_counts_df, names="protocol", values="count", title="Protocol Distribution")
             st.plotly_chart(fig2, use_container_width=True, config=config)
-            st.download_button("Download Data as CSV", convert_df_to_csv(protocol_counts_df), "protocol_dist.csv", "text/csv")
+            st.download_button("Download Data as CSV", convert_df_to_csv(protocol_counts_df), "protocol_dist.csv", "text/csv", key='download-protocols')
 
         st.markdown("---")
         st.markdown("#### Top IP Addresses")
@@ -121,22 +102,13 @@ def main_dashboard():
             top_src_ips_df = df['src_ip'].value_counts().nlargest(10).reset_index()
             fig3 = px.bar(top_src_ips_df, x='src_ip', y='count', title="Top 10 Source IPs")
             st.plotly_chart(fig3, use_container_width=True, config=config)
-            st.download_button("Download Data as CSV", convert_df_to_csv(top_src_ips_df), "top_source_ips.csv", "text/csv")
+            st.download_button("Download Data as CSV", convert_df_to_csv(top_src_ips_df), "top_source_ips.csv", "text/csv", key='download-src-ips')
         with col4:
             top_dst_ips_df = df['dst_ip'].value_counts().nlargest(10).reset_index()
             fig4 = px.bar(top_dst_ips_df, x='dst_ip', y='count', title="Top 10 Destination IPs")
             st.plotly_chart(fig4, use_container_width=True, config=config)
-            st.download_button("Download Data as CSV", convert_df_to_csv(top_dst_ips_df), "top_dest_ips.csv", "text/csv")
+            st.download_button("Download Data as CSV", convert_df_to_csv(top_dst_ips_df), "top_dest_ips.csv", "text/csv", key='download-dst-ips')
 
 # --- Run App ---
 if __name__ == "__main__":
-    if "login" not in st.secrets:
-        st.error("CRITICAL: Your .streamlit/secrets.toml file is missing or incomplete.")
-    else:
-        if "logged_in" not in st.session_state:
-            st.session_state.logged_in = False
-        
-        if st.session_state.logged_in:
-            main_dashboard()
-        else:
-            login_page()
+    main_dashboard()
