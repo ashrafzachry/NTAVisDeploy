@@ -117,14 +117,6 @@ def send_otp(otp, recipient_email):
     try:
         sender_email = st.secrets["gmail"]["email"]
         app_password = st.secrets["gmail"]["app_password"]
-        msg = MIMEText(f"Your OTP code is: {otp}")
-        msg["Subject"] = "Your NTAVis OTP Code"
-        msg["From"] = formataddr((str(Header('NTAVis OTP', 'utf-8')), sender_email))
-        msg["To"] = recipient_email
-        def send_otp(otp, recipient_email):
-    try:
-        sender_email = st.secrets["gmail"]["email"]
-        app_password = st.secrets["gmail"]["app_password"]
 
         msg = MIMEText(f"Your OTP code is: {otp}")
         msg["Subject"] = "Your NTAVis OTP Code"
@@ -143,10 +135,6 @@ def send_otp(otp, recipient_email):
         st.error(f"Failed to send OTP. Check your secrets.toml file. Error: {e}")
         return False
 
-        return True
-    except Exception as e:
-        st.error(f"Failed to send OTP. Check your secrets.toml file. Error: {e}")
-        return False
 
 # --- Main App Logic ---
 def main():
